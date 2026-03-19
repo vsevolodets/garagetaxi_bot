@@ -1,39 +1,38 @@
-
 import asyncio
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
-from aiogram.enums import ParseMode   # <- вместо импорта из types
+from aiogram.enums import ParseMode
 from aiogram.filters import BaseFilter
+from aiohttp import web
 
-API_TOKEN = '8681478738:AAFbHzckzVQdEqRdHsgmtqjwRoKnHTnaAlg'
-BOSS_ID = 746633664  # Telegram ID шефа
+API_TOKEN = os.environ.get("API_TOKEN", "8681478738:AAFbHzckzVQdEqRdHsgmtqjwRoKnHTnaAlg")
+BOSS_ID = int(os.environ.get("BOSS_ID", 746633664))
+
+WEBHOOK_HOST = os.environ.get("WEBHOOK_HOST", "https://your-app-url.up.railway.app")  # URL Railway
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
 boss_messages = {}
 
-# Фильтр сообщений от шефа
 class BossFilter(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         return message.from_user.id == BOSS_ID
 
-# Функция формирования кликабельного упоминания
 def get_mention(user):
     if isinstance(user, types.User):
         return f"[{user.first_name}](tg://user?id={user.id})"
     return str(user)
 
-# Обработчик сообщений шефа
 @dp.message(BossFilter())
 async def boss_message(message: Message):
-    # Фильтры: есть ?, длина >=5
     if '?' not in message.text or len(message.text.strip()) < 5:
         return
 
     print(f"[LOG] Сообщение шефа: {message.text} ({message.message_id})")
-
-    # Определяем упомянутого пользователя
     mentioned_user = None
     if message.entities:
         for entity in message.entities:
@@ -45,17 +44,15 @@ async def boss_message(message: Message):
                 mentioned_user = username
                 break
 
-    # Инициализация данных по сообщению
     boss_messages[message.message_id] = {
         "chat_id": message.chat.id,
         "replied": False,
         "mentioned_user": mentioned_user,
-        "bot_replies": [],  # список ID сообщений бота
-        "step": 0  # счетчик автоответов
+        "bot_replies": [],
+        "step": 0
     }
     asyncio.create_task(auto_reply_loop(message.message_id))
 
-# Обработчик любых reply
 @dp.message()
 async def any_reply(message: Message):
     if message.reply_to_message:
@@ -64,9 +61,8 @@ async def any_reply(message: Message):
             print(f"[LOG] На сообщение шефа пришел ответ: {message.text}")
             boss_messages[replied_id]["replied"] = True
 
-# Автоответ с разными таймингами и удалением старых сообщений
 async def auto_reply_loop(message_id):
-    timings = [4*60, 4*60, 4*60, 60, 60, 60, 4*60]  # в секундах
+    timings = [4*60, 4*60, 4*60, 60, 60, 60, 4*60]
     texts = [
         "Ответа не было",
         "Напоминаю, ответа не было",
@@ -85,18 +81,15 @@ async def auto_reply_loop(message_id):
         await asyncio.sleep(delay)
         data = boss_messages.get(message_id)
         if not data or data["replied"]:
-            # Если пришел ответ, прекращаем цикл
             break
 
-        # Удаляем старые сообщения бота
         for msg_id in data["bot_replies"]:
             try:
                 await bot.delete_message(chat_id=data["chat_id"], message_id=msg_id)
             except:
-                pass  # игнорируем ошибки удаления
+                pass
         data["bot_replies"].clear()
 
-        # Формируем текст с упоминанием, если есть
         text = texts[i]
         if data["mentioned_user"]:
             text += " " + get_mention(data["mentioned_user"])
@@ -112,10 +105,22 @@ async def auto_reply_loop(message_id):
 
     boss_messages.pop(message_id, None)
 
-# Запуск бота
-async def main():
-    print("[LOG] Бот запущен...")
-    await dp.start_polling(bot)
+# --- Webhook сервер для Railway ---
+async def handle(request):
+    update = types.Update(**await request.json())
+    await dp.process_update(update)
+    return web.Response()
+
+async def on_startup(app):
+    await bot.set_webhook(WEBHOOK_URL)
+
+async def on_shutdown(app):
+    await bot.delete_webhook()
+
+app = web.Application()
+app.router.add_post(WEBHOOK_PATH, handle)
+app.on_startup.append(on_startup)
+app.on_cleanup.append(on_shutdown)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
