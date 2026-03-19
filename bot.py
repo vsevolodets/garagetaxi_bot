@@ -1,17 +1,11 @@
 import asyncio
-import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
 from aiogram.enums import ParseMode
 from aiogram.filters import BaseFilter
-from aiohttp import web
 
-API_TOKEN = os.environ.get("API_TOKEN", "8681478738:AAFbHzckzVQdEqRdHsgmtqjwRoKnHTnaAlg")
-BOSS_ID = int(os.environ.get("BOSS_ID", 746633664))
-
-WEBHOOK_HOST = os.environ.get("WEBHOOK_HOST", "https://your-app-url.up.railway.app")  # URL Railway
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+API_TOKEN = '8681478738:AAFbHzckzVQdEqRdHsgmtqjwRoKnHTnaAlg'
+BOSS_ID = 746633664  # Telegram ID шефа
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -31,7 +25,6 @@ def get_mention(user):
 async def boss_message(message: Message):
     if '?' not in message.text or len(message.text.strip()) < 5:
         return
-
     print(f"[LOG] Сообщение шефа: {message.text} ({message.message_id})")
     mentioned_user = None
     if message.entities:
@@ -43,7 +36,6 @@ async def boss_message(message: Message):
                 username = message.text[entity.offset: entity.offset + entity.length]
                 mentioned_user = username
                 break
-
     boss_messages[message.message_id] = {
         "chat_id": message.chat.id,
         "replied": False,
@@ -72,28 +64,23 @@ async def auto_reply_loop(message_id):
         "Напоминаю ещё раз",
         "Штраф 5000 рублей"
     ]
-
     data = boss_messages.get(message_id)
     if not data:
         return
-
     for i, delay in enumerate(timings):
         await asyncio.sleep(delay)
         data = boss_messages.get(message_id)
         if not data or data["replied"]:
             break
-
         for msg_id in data["bot_replies"]:
             try:
                 await bot.delete_message(chat_id=data["chat_id"], message_id=msg_id)
             except:
                 pass
         data["bot_replies"].clear()
-
         text = texts[i]
         if data["mentioned_user"]:
             text += " " + get_mention(data["mentioned_user"])
-
         sent = await bot.send_message(
             chat_id=data["chat_id"],
             text=text,
@@ -102,25 +89,11 @@ async def auto_reply_loop(message_id):
         )
         data["bot_replies"].append(sent.message_id)
         data["step"] = i + 1
-
     boss_messages.pop(message_id, None)
 
-# --- Webhook сервер для Railway ---
-async def handle(request):
-    update = types.Update(**await request.json())
-    await dp.process_update(update)
-    return web.Response()
-
-async def on_startup(app):
-    await bot.set_webhook(WEBHOOK_URL)
-
-async def on_shutdown(app):
-    await bot.delete_webhook()
-
-app = web.Application()
-app.router.add_post(WEBHOOK_PATH, handle)
-app.on_startup.append(on_startup)
-app.on_cleanup.append(on_shutdown)
+async def main():
+    print("[LOG] Бот запущен...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    asyncio.run(main())
