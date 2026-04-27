@@ -11,17 +11,19 @@ dp = Dispatcher()
 
 boss_messages = {}
 
+
 class BossFilter(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         return message.from_user.id == BOSS_ID
 
-# Безопасное упоминание (без Markdown)
+
 def get_mention(user):
     if isinstance(user, types.User):
         return user.first_name
     elif isinstance(user, str):
-        return user  # @username
+        return user
     return str(user)
+
 
 @dp.message(BossFilter())
 async def boss_message(message: Message):
@@ -54,17 +56,36 @@ async def boss_message(message: Message):
 
     asyncio.create_task(auto_reply_loop(message.message_id))
 
+
 @dp.message()
 async def any_reply(message: Message):
-    if message.reply_to_message:
-        replied_id = message.reply_to_message.message_id
+    if not message.reply_to_message:
+        return
 
-        if replied_id in boss_messages:
-            print(f"[LOG] На сообщение шефа пришел ответ: {message.text}")
-            boss_messages[replied_id]["replied"] = True
+    replied_id = message.reply_to_message.message_id
+
+    if replied_id not in boss_messages:
+        return
+
+    print(f"[LOG] Получен ответ на сообщение шефа: {message.text}")
+
+    data = boss_messages[replied_id]
+    data["replied"] = True
+
+    for msg_id in data["bot_replies"]:
+        try:
+            await bot.delete_message(
+                chat_id=data["chat_id"],
+                message_id=msg_id
+            )
+        except Exception as e:
+            print(f"[ERROR] Не удалось удалить сообщение: {e}")
+
+    boss_messages.pop(replied_id, None)
+
 
 async def auto_reply_loop(message_id):
-    timings = [4*60, 4*60, 4*60, 60, 60, 60, 4*60]
+    timings = [4 * 60, 4 * 60, 4 * 60, 60, 60, 60, 4 * 60]
 
     texts = [
         "Ответа не было",
@@ -87,7 +108,6 @@ async def auto_reply_loop(message_id):
         if not data or data["replied"]:
             break
 
-        # Удаляем старые сообщения бота
         for msg_id in data["bot_replies"]:
             try:
                 await bot.delete_message(
@@ -99,13 +119,11 @@ async def auto_reply_loop(message_id):
 
         data["bot_replies"].clear()
 
-        # Формируем текст
         text = texts[i]
 
         if data["mentioned_user"]:
             text += " " + get_mention(data["mentioned_user"])
 
-        # 🔥 Безопасная отправка (не упадет)
         try:
             sent = await bot.send_message(
                 chat_id=data["chat_id"],
@@ -121,9 +139,11 @@ async def auto_reply_loop(message_id):
 
     boss_messages.pop(message_id, None)
 
+
 async def main():
     print(f"[LOG] Бот запущен, токен: {API_TOKEN[:10]}...")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
