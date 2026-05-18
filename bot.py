@@ -4,7 +4,7 @@ from aiogram.types import Message
 from aiogram.filters import BaseFilter
 
 API_TOKEN = '8681478738:AAFbHzckzVQdEqRdHsgmtqjwRoKnHTnaAlg'
-BOSS_ID = 746633664  # Telegram ID шефа
+BOSS_ID = 746633664
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -25,8 +25,36 @@ def get_mention(user):
     return str(user)
 
 
+async def stop_tracking(replied_id):
+    data = boss_messages.get(replied_id)
+    if not data:
+        return
+
+    data["replied"] = True
+
+    for msg_id in data["bot_replies"]:
+        try:
+            await bot.delete_message(
+                chat_id=data["chat_id"],
+                message_id=msg_id
+            )
+        except Exception as e:
+            print(f"[ERROR] Не удалось удалить сообщение: {e}")
+
+    boss_messages.pop(replied_id, None)
+
+
 @dp.message(BossFilter())
 async def boss_message(message: Message):
+    # Если шеф сам отвечает на свое отслеживаемое сообщение — останавливаем
+    if message.reply_to_message:
+        replied_id = message.reply_to_message.message_id
+
+        if replied_id in boss_messages:
+            print(f"[LOG] Шеф остановил напоминания ответом: {message.text}")
+            await stop_tracking(replied_id)
+            return
+
     if not message.text:
         return
 
@@ -68,20 +96,7 @@ async def any_reply(message: Message):
         return
 
     print(f"[LOG] Получен ответ на сообщение шефа: {message.text}")
-
-    data = boss_messages[replied_id]
-    data["replied"] = True
-
-    for msg_id in data["bot_replies"]:
-        try:
-            await bot.delete_message(
-                chat_id=data["chat_id"],
-                message_id=msg_id
-            )
-        except Exception as e:
-            print(f"[ERROR] Не удалось удалить сообщение: {e}")
-
-    boss_messages.pop(replied_id, None)
+    await stop_tracking(replied_id)
 
 
 async def auto_reply_loop(message_id):
